@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+langchain-core
+langgraph
+langchain-ollama
+langgraph-checkpoint-postgres
+psycopg[binary]
+sqlalchemy
+python-dotenv
+httpx
+pgvector
+langsmith
