@@ -1,0 +1,75 @@
+name: ci
+on:
+  push: {branches: [main]}
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: {POSTGRES_USER: steward, POSTGRES_PASSWORD: steward, POSTGRES_DB: postgres}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U steward" --health-interval 3s
+          --health-retries 20
+    env:
+      AGENT_DATABASE_URL: postgresql://steward:steward@localhost:5432/billing
+      AGENT_CHECKPOINT_DB_URL: postgresql://steward:steward@localhost:5432/agent_checkpoints
+      AGENT_FAKE_MODEL: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r backend/requirements.txt
+      - run: ruff check app tests
+        working-directory: backend
+      - run: mypy app --ignore-missing-imports
+        working-directory: backend
+        continue-on-error: true   # advisory
+      - run: pytest -q -m "not live"
+        working-directory: backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "20"}
+      - run: npm install
+        working-directory: frontend
+      - run: npx tsc --noEmit
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env: {POSTGRES_USER: steward, POSTGRES_PASSWORD: steward, POSTGRES_DB: postgres}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U steward" --health-interval 3s
+          --health-retries 20
+    env:
+      AGENT_DATABASE_URL: postgresql://steward:steward@localhost:5432/billing
+      AGENT_CHECKPOINT_DB_URL: postgresql://steward:steward@localhost:5432/agent_checkpoints
+      AGENT_FAKE_MODEL: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "20"}
+      - run: pip install -r backend/requirements.txt
+      - run: python -m app.db.ensure
+        working-directory: backend
+      - run: npm install
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npx playwright test
+        working-directory: frontend
