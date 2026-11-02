@@ -1,0 +1,80 @@
+name: steward
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: steward
+      POSTGRES_PASSWORD: steward
+      POSTGRES_DB: billing
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/app/db/00-databases.sql:/docker-entrypoint-initdb.d/00-databases.sql:ro
+      - ./backend/app/db/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./backend/app/db/02-seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U steward -d billing"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: [ollama:/root/.ollama]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # One-shot model puller; backend waits for this to complete.
+  bootstrap:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama: {condition: service_healthy}
+    environment:
+      OLLAMA_HOST: "ollama:11434"
+    command: sh -c "ollama pull llama3.1:8b && ollama pull nomic-embed-text"
+    restart: "no"
+
+  backend:
+    build: {context: ., dockerfile: backend/Dockerfile}
+    depends_on:
+      db: {condition: service_healthy}
+      bootstrap: {condition: service_completed_successfully}
+    environment:
+      AGENT_DATABASE_URL: postgresql://steward:steward@db:5432/billing
+      AGENT_CHECKPOINT_DB_URL: postgresql://steward:steward@db:5432/agent_checkpoints
+      AGENT_OLLAMA_BASE_URL: http://ollama:11434
+      AGENT_FAKE_MODEL: ${AGENT_FAKE_MODEL:-false}
+      AGENT_LANGSMITH_TRACING: ${AGENT_LANGSMITH_TRACING:-false}
+      AGENT_LANGSMITH_API_KEY: ${AGENT_LANGSMITH_API_KEY:-}
+      AGENT_LANGSMITH_PROJECT: ${AGENT_LANGSMITH_PROJECT:-steward}
+    ports: ["8000:8000"]
+    volumes:
+      - ./backend:/app/backend
+      - ./docs:/app/docs
+    command: sh -c "python -m app.ingest && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frontend:
+    build: {context: ./frontend, dockerfile: Dockerfile}
+    depends_on: [backend]
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports: ["5173:5173"]
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+
+volumes:
+  pgdata:
+  ollama:
+  frontend_node_modules:
