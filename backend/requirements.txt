@@ -12,3 +12,7 @@ python-dotenv
 httpx
 pgvector
 langsmith
+mypy
+pytest
+pytest-asyncio
+ruff

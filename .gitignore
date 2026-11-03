@@ -1,3 +1,12 @@
 .vscode
-
-venv
+venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.mypy_cache/
+node_modules/
+dist/
+playwright-report/
+test-results/
+.env
+backend/.env
